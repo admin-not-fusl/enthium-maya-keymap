@@ -1,0 +1,802 @@
+//Maya Preference 2027 (Release 1)
+//
+//
+
+//
+// The runtime commands referenced by the hotkeys
+//
+runTimeCommand
+	-label ""
+	-annotation "shaded > textured > textured+lights; from wireframe go to textured"
+	-longAnnotation ""
+	-category "Custom Scripts.Keymap"
+	-image ""
+	-tags ""
+	-keywords ""
+	-plugin ""
+	-helpUrl ""
+	-hotkeyCtx ""
+	-commandLanguage "python"
+	-command ("\"\"\"Cycle the viewport's shading mode on one key.\n\n    shaded  ->  shaded + textures  ->  shaded + textures + lights  ->  shaded ...\n\nComing from wireframe or wireframe-on-shaded (or anything else that isn't one of\nthe three states) always lands on shaded + textures, with the wire overlay off.\nActs on the viewport under the pointer, falling back to the focused one.\n\"\"\"\nimport maya.cmds as cmds\n\n# label, displayTextures, displayLights\nSTATES = [\n    ('shaded', False, 'default'),\n    ('shaded + textured', True, 'default'),\n    ('shaded + textured + lights', True, 'all'),\n]\nFROM_ELSEWHERE = 1  # index landed on when coming from wireframe etc.\n\n\ndef _model_panel():\n    for panel in (cmds.getPanel(underPointer=True), cmds.getPanel(withFocus=True)):\n        if panel and cmds.getPanel(typeOf=panel) == 'modelPanel':\n            return panel\n    return None\n\n\ndef cycle_shading():\n    panel = _model_panel()\n    if not panel:\n        return\n    appearance = cmds.modelEditor(panel, q=True, displayAppearance=True)\n    textures = bool(cmds.modelEditor(panel, q=True, displayTextures=True))\n    lights = cmds.modelEditor(panel, q=True, displayLights=True)\n    wos = bool(cmds.modelEditor(panel, q=True, wireframeOnShaded=True))\n\n    if appearance != 'smoothShaded' or wos:\n        target = FROM_ELSEWHERE\n    else:\n        current = next((i for i, (_, t, l) in enumerate(STATES)\n                        if t == textures and l == lights), None)\n        target = FROM_ELSEWHERE if current is None else (current + 1) % len(STATES)\n\n    label, textures, lights = STATES[target]\n    cmds.modelEditor(panel, e=True, displayAppearance='smoothShaded', wireframeOnShaded=False,\n                     displayTextures=textures, displayLights=lights)\n    cmds.inViewMessage(amg='<hl>%s</hl>' % label, pos='midCenterBot', fade=True,\n                       fadeStayTime=500)\n\n\ncycle_shading()\n")
+	mk_CycleShading;
+
+runTimeCommand
+	-label ""
+	-annotation "cycle active transform tool axis: object > world > component"
+	-longAnnotation ""
+	-category "Custom Scripts.Keymap"
+	-image ""
+	-tags ""
+	-keywords ""
+	-plugin ""
+	-helpUrl ""
+	-hotkeyCtx ""
+	-commandLanguage "python"
+	-command ("\"\"\"Cycle the active transform tool's axis orientation: object -> world -> component.\n\nWorks on whichever of Move / Rotate / Scale is the current tool. Modes that a tool\ndoes not support are skipped, so the cycle is shorter for Rotate if it turns out\nto have no component mode in this build.\n\"\"\"\nimport maya.cmds as cmds\n\n# (label, mode number) in cycle order, per manipulator class\n_CYCLE = {\n    'manipMove':   [('object', 0), ('world', 2), ('component', 10)],\n    'manipRotate': [('object', 0), ('world', 1), ('component', 4)],\n    'manipScale':  [('object', 0), ('world', 2), ('component', 10)],\n}\n_CMD = {\n    'manipMove': cmds.manipMoveContext,\n    'manipRotate': cmds.manipRotateContext,\n    'manipScale': cmds.manipScaleContext,\n}\n_CTX = {'manipMove': 'Move', 'manipRotate': 'Rotate', 'manipScale': 'Scale'}\n\n\ndef _active_manip():\n    ctx = cmds.currentCtx()\n    try:\n        cls = cmds.contextInfo(ctx, c=True)\n    except RuntimeError:\n        cls = ''\n    if cls in _CYCLE:\n        return cls\n    # super contexts (the default W/E/R tools) report their own class, so fall back on name\n    low = ctx.lower()\n    for cls in _CYCLE:\n        if cls[5:].lower() in low:\n            return cls\n    return None\n\n\ndef cycle_axis():\n    cls = _active_manip()\n    if not cls:\n        cmds.inViewMessage(amg='No transform tool active', pos='midCenterBot', fade=True)\n        return\n    cmd, name, cycle = _CMD[cls], _CTX[cls], _CYCLE[cls]\n    current = cmd(name, q=True, mode=True)\n    order = [m for _, m in cycle]\n    start = order.index(current) if current in order else -1\n    for step in range(1, len(cycle) + 1):\n        label, mode = cycle[(start + step) % len(cycle)]\n        try:\n            cmd(name, e=True, mode=mode)\n        except RuntimeError:\n            continue  # this build doesn't have that mode for this tool\n        if cmd(name, q=True, mode=True) == mode:\n            cmds.inViewMessage(amg='%s axis: <hl>%s</hl>' % (name, label),\n                               pos='midCenterBot', fade=True, fadeStayTime=600)\n            return\n    cmds.inViewMessage(amg='Could not change axis mode', pos='midCenterBot', fade=True)\n\n\ncycle_axis()\n")
+	mk_CycleAxis;
+
+runTimeCommand
+	-label ""
+	-annotation "wireframe <> wireframe on shaded"
+	-longAnnotation ""
+	-category "Custom Scripts.Keymap"
+	-image ""
+	-tags ""
+	-keywords ""
+	-plugin ""
+	-helpUrl ""
+	-hotkeyCtx ""
+	-commandLanguage "python"
+	-command ("\"\"\"Toggle the viewport between wireframe and wireframe-on-shaded.\n\n    wireframe  <->  wireframe on shaded\n\nComing from anything else (plain shaded, textured...) lands on wireframe first.\nTextures and lights are left as they are, so wireframe-on-shaded keeps whatever\nshading you had. Acts on the viewport under the pointer, else the focused one.\n\"\"\"\nimport maya.cmds as cmds\n\n\ndef _model_panel():\n    for panel in (cmds.getPanel(underPointer=True), cmds.getPanel(withFocus=True)):\n        if panel and cmds.getPanel(typeOf=panel) == 'modelPanel':\n            return panel\n    return None\n\n\ndef toggle_wireframe():\n    panel = _model_panel()\n    if not panel:\n        return\n    appearance = cmds.modelEditor(panel, q=True, displayAppearance=True)\n    wos = bool(cmds.modelEditor(panel, q=True, wireframeOnShaded=True))\n\n    if appearance == 'wireframe':\n        cmds.modelEditor(panel, e=True, displayAppearance='smoothShaded', wireframeOnShaded=True)\n        label = 'wireframe on shaded'\n    else:\n        cmds.modelEditor(panel, e=True, displayAppearance='wireframe', wireframeOnShaded=False)\n        label = 'wireframe'\n    cmds.inViewMessage(amg='<hl>%s</hl>' % label, pos='midCenterBot', fade=True, fadeStayTime=500)\n\n\ntoggle_wireframe()\n")
+	mk_ToggleWireframe;
+
+//
+// The name commands referenced by the hotkeys
+//
+nameCommand
+	-annotation "Redo View Change"
+	-sourceType "mel"
+	-command ("RedoViewChange")
+	RedoViewChangeNameCommand;
+
+nameCommand
+	-annotation "Display UV shells in wireframe and with no shading"
+	-sourceType "mel"
+	-command ("DisplayUVWireframe")
+	DisplayUVWireframeNameCommand;
+
+nameCommand
+	-annotation "Pan and zoom the UV editor view to show the current selection"
+	-sourceType "mel"
+	-command ("UVEditorFrameSelected")
+	UVEditorFrameSelectedNameCommand;
+
+nameCommand
+	-annotation "Move components in the UV view"
+	-sourceType "mel"
+	-command ("MoveUVTool")
+	MoveUVToolNameCommand;
+
+nameCommand
+	-annotation "Rotate components in the UV view"
+	-sourceType "mel"
+	-command ("RotateUVTool")
+	RotateUVToolNameCommand;
+
+nameCommand
+	-annotation "Scale components in the UV view"
+	-sourceType "mel"
+	-command ("ScaleUVTool")
+	ScaleUVToolNameCommand;
+
+nameCommand
+	-annotation "Sets a keyframe on all channels that are selected."
+	-sourceType "mel"
+	-command ("SetKey")
+	SetKeyNameCommand;
+
+nameCommand
+	-annotation "Point Snap (Press)"
+	-sourceType "mel"
+	-command ("dR_pointSnapPress")
+	dR_pointSnapPressNameCommand;
+
+nameCommand
+	-annotation "Point Snap (Release)"
+	-sourceType "mel"
+	-command ("dR_pointSnapRelease")
+	dR_pointSnapReleaseNameCommand;
+
+nameCommand
+	-annotation "cycle active transform tool axis: object > world > component"
+	-sourceType "mel"
+	-command ("mk_CycleAxis")
+	mk_CycleAxisNameCommand;
+
+nameCommand
+	-annotation "Move/Rotate/Scale/ShowManip tool toggle snap mode"
+	-sourceType "mel"
+	-command ("MoveRotateScaleToolToggleSnapMode")
+	MoveRotateScaleToolToggleSnapModeNameCommand;
+
+nameCommand
+	-annotation "Toggle relative snap mode"
+	-sourceType "mel"
+	-command ("MoveRotateScaleToolToggleSnapRelativeMode")
+	MoveRotateScaleToolToggleSnapRelativeModeNameCommand;
+
+nameCommand
+	-annotation "Repeat last"
+	-sourceType "mel"
+	-command ("RepeatLast")
+	RepeatLastNameCommand;
+
+nameCommand
+	-annotation "NonSacred tool"
+	-sourceType "mel"
+	-command ("NonSacredTool")
+	NonSacredToolNameCommand;
+
+nameCommand
+	-annotation "Toggle visibility of selected objects"
+	-sourceType "mel"
+	-command ("ToggleVisibilityAndKeepSelection")
+	ToggleVisibilityAndKeepSelectionNameCommand;
+
+nameCommand
+	-annotation "Show the last hidden item"
+	-sourceType "mel"
+	-command ("ShowLastHidden")
+	ShowLastHiddenNameCommand;
+
+nameCommand
+	-annotation "Parent the selected object(s) to the last selected object"
+	-sourceType "mel"
+	-command ("Parent")
+	ParentNameCommand;
+
+nameCommand
+	-annotation "Unparent the selected object(s)"
+	-sourceType "mel"
+	-command ("Unparent")
+	UnparentNameCommand;
+
+nameCommand
+	-annotation "Enter tool edit mode (press)"
+	-sourceType "mel"
+	-command ("EnterEditModePress")
+	EnterEditModePressNameCommand;
+
+nameCommand
+	-annotation "Enter tool edit mode (release)"
+	-sourceType "mel"
+	-command ("EnterEditModeRelease")
+	EnterEditModeReleaseNameCommand;
+
+nameCommand
+	-annotation "Fit selection without children in active panel"
+	-sourceType "mel"
+	-command ("FrameSelectedWithoutChildren")
+	FrameSelectedWithoutChildrenNameCommand;
+
+nameCommand
+	-annotation "Change the cameras to frame the selected object(s) with children in the view"
+	-sourceType "mel"
+	-command ("FrameSelectedInAllViews")
+	FrameSelectedInAllViewsNameCommand;
+
+nameCommand
+	-annotation "Change the cameras to frame the selected object(s) without children in the view"
+	-sourceType "mel"
+	-command ("FrameSelectedWithoutChildrenInAllViews")
+	FrameSelectedWithoutChildrenInAllViewsNameCommand;
+
+nameCommand
+	-annotation "wireframe <> wireframe on shaded"
+	-sourceType "mel"
+	-command ("mk_ToggleWireframe")
+	mk_ToggleWireframeNameCommand;
+
+nameCommand
+	-annotation "shaded > textured > textured+lights; from wireframe go to textured"
+	-sourceType "mel"
+	-command ("mk_CycleShading")
+	mk_CycleShadingNameCommand;
+
+nameCommand
+	-annotation "Redo the last undone action"
+	-sourceType "mel"
+	-command ("Redo")
+	RedoNameCommand;
+
+nameCommand
+	-annotation "Show manipulator tool"
+	-sourceType "mel"
+	-command ("ShowManipulators")
+	ShowManipulatorsNameCommand;
+
+nameCommand
+	-annotation "Show hotbox"
+	-sourceType "mel"
+	-command ("ShowHotbox")
+	ShowHotboxNameCommand;
+
+nameCommand
+	-annotation "Hide hotbox"
+	-sourceType "mel"
+	-command ("HideHotbox")
+	HideHotboxNameCommand;
+
+nameCommand
+	-annotation "Low quality display setting"
+	-sourceType "mel"
+	-command ("LowQualityDisplay")
+	LowQualityDisplayNameCommand;
+
+nameCommand
+	-annotation "High quality display setting"
+	-sourceType "mel"
+	-command ("HighQualityDisplay")
+	HighQualityDisplayNameCommand;
+
+nameCommand
+	-annotation "Switch between Object selection and last Component selection"
+	-sourceType "mel"
+	-command ("SelectToggleMode")
+	SelectToggleModeNameCommand;
+
+nameCommand
+	-annotation "Sets Face Mask"
+	-sourceType "mel"
+	-command ("SelectFacetMask")
+	SelectFacetMaskNameCommand;
+
+nameCommand
+	-annotation "Sets Vertex Mask"
+	-sourceType "mel"
+	-command ("SelectVertexMask")
+	SelectVertexMaskNameCommand;
+
+nameCommand
+	-annotation "Sets Vertex Face Mask"
+	-sourceType "mel"
+	-command ("SelectVertexFaceMask")
+	SelectVertexFaceMaskNameCommand;
+
+nameCommand
+	-annotation "Sets UV Mask"
+	-sourceType "mel"
+	-command ("SelectUVMask")
+	SelectUVMaskNameCommand;
+
+nameCommand
+	-annotation "Sets Mesh UV Shell Mask"
+	-sourceType "mel"
+	-command ("SelectMeshUVShell")
+	SelectMeshUVShellNameCommand;
+
+nameCommand
+	-annotation "Sets Edge Mask"
+	-sourceType "mel"
+	-command ("SelectEdgeMask")
+	SelectEdgeMaskNameCommand;
+
+nameCommand
+	-annotation "Soft Selection Falloff Sticky (Press)"
+	-sourceType "mel"
+	-command ("dR_softSelStickyPress")
+	dR_softSelStickyPressNameCommand;
+
+nameCommand
+	-annotation "Soft Selection Falloff Sticky (Release)"
+	-sourceType "mel"
+	-command ("dR_softSelStickyRelease")
+	dR_softSelStickyReleaseNameCommand;
+
+nameCommand
+	-annotation "Undo the last action"
+	-sourceType "mel"
+	-command ("Undo")
+	UndoNameCommand;
+
+//
+// The user hotkeys
+//
+//
+// The hotkey set
+//
+hotkeySet -source "Maya_Default" -current Enthium;
+//
+// The hotkey contexts and hotkeys
+//
+hotkey -keyShortcut "4" -name ("SelectToggleModeNameCommand");
+hotkey -keyShortcut "F2" -name ("mk_ToggleWireframeNameCommand");
+hotkey -keyShortcut "v" -ctl -releaseName ("");
+hotkey -keyShortcut "z" -alt -name ("");
+hotkey -keyShortcut "e" -sht -releaseName ("");
+hotkey -keyShortcut "]" -name ("");
+hotkey -keyShortcut "Return" -name ("");
+hotkey -keyShortcut "~" -alt -name ("");
+hotkey -keyShortcut "Up" -releaseName ("");
+hotkey -keyShortcut "f" -name ("");
+hotkey -keyShortcut "q" -name ("LowQualityDisplayNameCommand");
+hotkey -keyShortcut "3" -alt -releaseName ("");
+hotkey -keyShortcut "+" -name ("");
+hotkey -keyShortcut "." -name ("mk_CycleAxisNameCommand");
+hotkey -keyShortcut "'" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "h" -name ("");
+hotkey -keyShortcut "e" -ctl -name ("SearchEngineNameCommand");
+hotkey -keyShortcut "PgDown" -ctl -releaseName ("");
+hotkey -keyShortcut "j" -alt -releaseName ("");
+hotkey -keyShortcut "v" -releaseName ("");
+hotkey -keyShortcut "F3" -releaseName ("");
+hotkey -keyShortcut "x" -ctl -releaseName ("");
+hotkey -keyShortcut "Space" -ctl -releaseName ("");
+hotkey -keyShortcut "i" -alt -name ("");
+hotkey -keyShortcut "h" -sht -releaseName ("");
+hotkey -keyShortcut "F8" -releaseName ("");
+hotkey -keyShortcut "z" -releaseName ("");
+hotkey -keyShortcut "\\" -alt -releaseName ("");
+hotkey -keyShortcut "b" -ctl -releaseName ("");
+hotkey -keyShortcut "`" -alt -releaseName ("");
+hotkey -keyShortcut "PgUp" -releaseName ("");
+hotkey -keyShortcut ";" -ctl -releaseName ("");
+hotkey -keyShortcut "Home" -releaseName ("");
+hotkey -keyShortcut "i" -sht -name ("");
+hotkey -keyShortcut "'" -ctl -releaseName ("");
+hotkey -keyShortcut "p" -ctl -releaseName ("");
+hotkey -keyShortcut "s" -ctl -name ("");
+hotkey -keyShortcut "F10" -ctl -releaseName ("");
+hotkey -keyShortcut "y" -sht -releaseName ("");
+hotkey -keyShortcut "=" -ctl -releaseName ("");
+hotkey -keyShortcut "b" -releaseName ("");
+hotkey -keyShortcut "n" -ctl -releaseName ("");
+hotkey -keyShortcut "Space" -sht -releaseName ("");
+hotkey -keyShortcut "a" -ctl -sht -name ("");
+hotkey -keyShortcut "|" -releaseName ("");
+hotkey -keyShortcut "\\" -name ("dR_softSelStickyPressNameCommand");
+hotkey -keyShortcut "Left" -ctl -alt -name ("");
+hotkey -keyShortcut "F4" -ctl -releaseName ("");
+hotkey -keyShortcut ":" -releaseName ("");
+hotkey -keyShortcut "(" -releaseName ("");
+hotkey -keyShortcut "F12" -releaseName ("");
+hotkey -keyShortcut "m" -ctl -sht -name ("");
+hotkey -keyShortcut "c" -ctl -releaseName ("");
+hotkey -keyShortcut "r" -ctl -releaseName ("");
+hotkey -keyShortcut "`" -ctl -releaseName ("");
+hotkey -keyShortcut "i" -sht -releaseName ("");
+hotkey -keyShortcut "'" -ctl -name ("");
+hotkey -keyShortcut "p" -ctl -name ("");
+hotkey -keyShortcut "s" -ctl -releaseName ("");
+hotkey -keyShortcut "F10" -ctl -name ("");
+hotkey -keyShortcut "y" -sht -name ("ShowManipulatorsNameCommand");
+hotkey -keyShortcut "=" -ctl -name ("");
+hotkey -keyShortcut "b" -name ("RepeatLastNameCommand");
+hotkey -keyShortcut "i" -alt -releaseName ("");
+hotkey -keyShortcut "h" -sht -name ("");
+hotkey -keyShortcut "F8" -name ("");
+hotkey -keyShortcut "z" -name ("");
+hotkey -keyShortcut "\\" -alt -name ("");
+hotkey -keyShortcut "b" -ctl -name ("");
+hotkey -keyShortcut "`" -alt -name ("");
+hotkey -keyShortcut "PgUp" -name ("");
+hotkey -keyShortcut ";" -ctl -name ("");
+hotkey -keyShortcut "Home" -name ("");
+hotkey -keyShortcut "Left" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "F4" -ctl -name ("ConvertSelectionToEdgesNameCommand");
+hotkey -keyShortcut ":" -name ("");
+hotkey -keyShortcut "(" -name ("");
+hotkey -keyShortcut "F12" -name ("");
+hotkey -keyShortcut "m" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "c" -ctl -name ("");
+hotkey -keyShortcut "r" -ctl -name ("");
+hotkey -keyShortcut "`" -ctl -name ("");
+hotkey -keyShortcut "n" -ctl -name ("");
+hotkey -keyShortcut "Space" -sht -name ("");
+hotkey -keyShortcut "a" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "|" -name ("");
+hotkey -keyShortcut "\\" -releaseName ("dR_softSelStickyReleaseNameCommand");
+hotkey -keyShortcut "Return" -releaseName ("");
+hotkey -keyShortcut "~" -alt -releaseName ("");
+hotkey -keyShortcut "Up" -name ("");
+hotkey -keyShortcut "f" -releaseName ("");
+hotkey -keyShortcut "q" -releaseName ("");
+hotkey -keyShortcut "4" -releaseName ("");
+hotkey -keyShortcut "F2" -releaseName ("");
+hotkey -keyShortcut "v" -ctl -name ("");
+hotkey -keyShortcut "z" -alt -releaseName ("");
+hotkey -keyShortcut "e" -sht -name ("");
+hotkey -keyShortcut "]" -releaseName ("");
+hotkey -keyShortcut "v" -name ("");
+hotkey -keyShortcut "F3" -name ("mk_CycleShadingNameCommand");
+hotkey -keyShortcut "x" -ctl -name ("");
+hotkey -keyShortcut "Space" -ctl -name ("");
+hotkey -keyShortcut "3" -alt -name ("");
+hotkey -keyShortcut "+" -releaseName ("");
+hotkey -keyShortcut "." -releaseName ("");
+hotkey -keyShortcut "'" -ctl -alt -name ("");
+hotkey -keyShortcut "h" -releaseName ("");
+hotkey -keyShortcut "e" -ctl -releaseName ("");
+hotkey -keyShortcut "PgDown" -ctl -name ("");
+hotkey -keyShortcut "j" -alt -name ("");
+hotkey -keyShortcut "q" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "Right" -name ("");
+hotkey -keyShortcut "5" -name ("ParentNameCommand");
+hotkey -keyShortcut "e" -alt -name ("");
+hotkey -keyShortcut "F5" -ctl -name ("ConvertSelectionToUVsNameCommand");
+hotkey -keyShortcut "t" -ctl -name ("");
+hotkey -keyShortcut "y" -alt -name ("RedoViewChangeNameCommand");
+hotkey -keyShortcut "d" -ctl -releaseName ("");
+hotkey -keyShortcut "d" -releaseName ("");
+hotkey -keyShortcut "a" -sht -name ("");
+hotkey -keyShortcut "F10" -name ("");
+hotkey -keyShortcut "d" -alt -sht -releaseName ("");
+hotkey -keyShortcut "t" -alt -sht -name ("");
+hotkey -keyShortcut "}" -name ("");
+hotkey -keyShortcut "g" -name ("");
+hotkey -keyShortcut "g" -ctl -releaseName ("");
+hotkey -keyShortcut "7" -releaseName ("");
+hotkey -keyShortcut "s" -name ("");
+hotkey -keyShortcut "`" -name ("");
+hotkey -keyShortcut "u" -name ("FrameSelectedWithoutChildrenNameCommand");
+hotkey -keyShortcut "3" -ctl -name ("ConvertSelectionToFacesNameCommand");
+hotkey -keyShortcut "r" -sht -releaseName ("");
+hotkey -keyShortcut "F7" -releaseName ("");
+hotkey -keyShortcut "c" -ctl -alt -name ("");
+hotkey -keyShortcut "j" -name ("");
+hotkey -keyShortcut "d" -alt -releaseName ("");
+hotkey -keyShortcut "s" -alt -name ("");
+hotkey -keyShortcut "/" -name ("");
+hotkey -keyShortcut "." -ctl -alt -releaseName ("");
+hotkey -keyShortcut "b" -alt -releaseName ("");
+hotkey -keyShortcut "i" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "Right" -alt -releaseName ("");
+hotkey -keyShortcut "h" -ctl -releaseName ("");
+hotkey -keyShortcut "0" -releaseName ("");
+hotkey -keyShortcut "v" -sht -name ("");
+hotkey -keyShortcut ";" -releaseName ("");
+hotkey -keyShortcut ")" -releaseName ("");
+hotkey -keyShortcut "." -ctl -releaseName ("");
+hotkey -keyShortcut "6" -name ("");
+hotkey -keyShortcut "s" -alt -sht -name ("");
+hotkey -keyShortcut "F5" -releaseName ("");
+hotkey -keyShortcut "Up" -ctl -name ("");
+hotkey -keyShortcut "Down" -alt -releaseName ("");
+hotkey -keyShortcut "k" -name ("");
+hotkey -keyShortcut "g" -sht -releaseName ("");
+hotkey -keyShortcut "4" -alt -name ("");
+hotkey -keyShortcut "~" -ctl -releaseName ("");
+hotkey -keyShortcut "F6" -releaseName ("");
+hotkey -keyShortcut "y" -name ("NonSacredToolNameCommand");
+hotkey -keyShortcut "o" -name ("SetKeyNameCommand");
+hotkey -keyShortcut "v" -alt -name ("");
+hotkey -keyShortcut "p" -sht -name ("");
+hotkey -keyShortcut "w" -alt -releaseName ("");
+hotkey -keyShortcut "j" -sht -releaseName ("");
+hotkey -keyShortcut "b" -sht -releaseName ("");
+hotkey -keyShortcut "z" -ctl -releaseName ("");
+hotkey -keyShortcut "F5" -alt -releaseName ("");
+hotkey -keyShortcut "c" -sht -releaseName ("");
+hotkey -keyShortcut "u" -alt -name ("FrameSelectedInAllViewsNameCommand");
+hotkey -keyShortcut "F9" -name ("");
+hotkey -keyShortcut "5" -alt -name ("");
+hotkey -keyShortcut "v" -ctl -alt -name ("");
+hotkey -keyShortcut "PgDown" -name ("");
+hotkey -keyShortcut "h" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "m" -alt -name ("");
+hotkey -keyShortcut "c" -name ("EnterEditModePressNameCommand");
+hotkey -keyShortcut "e" -name ("ScaleToolWithSnapMarkingMenuNameCommand");
+hotkey -keyShortcut "Down" -alt -name ("");
+hotkey -keyShortcut "k" -releaseName ("");
+hotkey -keyShortcut "g" -sht -name ("");
+hotkey -keyShortcut "4" -alt -releaseName ("");
+hotkey -keyShortcut "~" -ctl -name ("");
+hotkey -keyShortcut "F6" -name ("");
+hotkey -keyShortcut "y" -releaseName ("");
+hotkey -keyShortcut "o" -releaseName ("");
+hotkey -keyShortcut "v" -alt -releaseName ("");
+hotkey -keyShortcut "." -ctl -name ("");
+hotkey -keyShortcut "6" -releaseName ("");
+hotkey -keyShortcut "s" -alt -sht -releaseName ("");
+hotkey -keyShortcut "F5" -name ("SelectMeshUVShellNameCommand");
+hotkey -keyShortcut "Up" -ctl -releaseName ("");
+hotkey -keyShortcut "F9" -releaseName ("");
+hotkey -keyShortcut "5" -alt -releaseName ("");
+hotkey -keyShortcut "v" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "PgDown" -releaseName ("");
+hotkey -keyShortcut "h" -ctl -alt -name ("");
+hotkey -keyShortcut "m" -alt -releaseName ("");
+hotkey -keyShortcut "c" -releaseName ("EnterEditModeReleaseNameCommand");
+hotkey -keyShortcut "e" -releaseName ("ScaleToolWithSnapMarkingMenuPopDownNameCommand");
+hotkey -keyShortcut "p" -sht -releaseName ("");
+hotkey -keyShortcut "w" -alt -name ("");
+hotkey -keyShortcut "j" -sht -name ("");
+hotkey -keyShortcut "b" -sht -name ("");
+hotkey -keyShortcut "z" -ctl -name ("");
+hotkey -keyShortcut "F5" -alt -name ("SelectUVMaskNameCommand");
+hotkey -keyShortcut "c" -sht -name ("");
+hotkey -keyShortcut "u" -alt -releaseName ("");
+hotkey -keyShortcut "d" -ctl -name ("");
+hotkey -keyShortcut "d" -name ("");
+hotkey -keyShortcut "a" -sht -releaseName ("");
+hotkey -keyShortcut "F10" -releaseName ("");
+hotkey -keyShortcut "d" -alt -sht -name ("");
+hotkey -keyShortcut "t" -alt -sht -releaseName ("");
+hotkey -keyShortcut "}" -releaseName ("");
+hotkey -keyShortcut "g" -releaseName ("");
+hotkey -keyShortcut "g" -ctl -name ("");
+hotkey -keyShortcut "7" -name ("");
+hotkey -keyShortcut "s" -releaseName ("");
+hotkey -keyShortcut "`" -releaseName ("");
+hotkey -keyShortcut "u" -releaseName ("");
+hotkey -keyShortcut "q" -ctl -sht -name ("");
+hotkey -keyShortcut "3" -ctl -releaseName ("");
+hotkey -keyShortcut "Right" -releaseName ("");
+hotkey -keyShortcut "5" -releaseName ("");
+hotkey -keyShortcut "e" -alt -releaseName ("");
+hotkey -keyShortcut "F5" -ctl -releaseName ("");
+hotkey -keyShortcut "t" -ctl -releaseName ("");
+hotkey -keyShortcut "y" -alt -releaseName ("");
+hotkey -keyShortcut "/" -releaseName ("");
+hotkey -keyShortcut "." -ctl -alt -name ("");
+hotkey -keyShortcut "b" -alt -name ("CycleBackgroundColorNameCommand");
+hotkey -keyShortcut "i" -ctl -sht -name ("");
+hotkey -keyShortcut "Right" -alt -name ("");
+hotkey -keyShortcut "h" -ctl -name ("");
+hotkey -keyShortcut "0" -name ("");
+hotkey -keyShortcut "v" -sht -releaseName ("");
+hotkey -keyShortcut ";" -name ("");
+hotkey -keyShortcut ")" -name ("");
+hotkey -keyShortcut "r" -sht -name ("");
+hotkey -keyShortcut "F7" -name ("");
+hotkey -keyShortcut "c" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "j" -releaseName ("");
+hotkey -keyShortcut "d" -alt -name ("");
+hotkey -keyShortcut "s" -alt -releaseName ("");
+hotkey -keyShortcut "," -ctl -releaseName ("");
+hotkey -keyShortcut "=" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "Home" -alt -name ("");
+hotkey -keyShortcut ";" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "," -ctl -alt -releaseName ("");
+hotkey -keyShortcut "f" -ctl -name ("");
+hotkey -keyShortcut "[" -releaseName ("");
+hotkey -keyShortcut "w" -name ("");
+hotkey -keyShortcut "-" -name ("ToggleVisibilityAndKeepSelectionNameCommand");
+hotkey -keyShortcut "u" -sht -releaseName ("");
+hotkey -keyShortcut "a" -ctl -name ("");
+hotkey -keyShortcut "q" -ctl -releaseName ("");
+hotkey -keyShortcut "x" -sht -releaseName ("");
+hotkey -keyShortcut "Backspace" -ctl -releaseName ("");
+hotkey -keyShortcut "a" -alt -sht -releaseName ("");
+hotkey -keyShortcut "h" -alt -name ("");
+hotkey -keyShortcut "," -alt -releaseName ("MoveRotateScaleToolToggleSnapRelativeModeNameCommand");
+hotkey -keyShortcut "2" -name ("SelectVertexMaskNameCommand");
+hotkey -keyShortcut "Del" -ctl -name ("");
+hotkey -keyShortcut "Ins" -name ("");
+hotkey -keyShortcut "Esc" -releaseName ("");
+hotkey -keyShortcut "s" -ctl -sht -releaseName ("");
+hotkey -keyShortcut ">" -releaseName ("");
+hotkey -keyShortcut "." -alt -releaseName ("");
+hotkey -keyShortcut "<" -name ("");
+hotkey -keyShortcut "Down" -ctl -name ("");
+hotkey -keyShortcut "1" -ctl -releaseName ("");
+hotkey -keyShortcut "f" -sht -releaseName ("");
+hotkey -keyShortcut "r" -releaseName ("");
+hotkey -keyShortcut "F9" -ctl -name ("");
+hotkey -keyShortcut "," -releaseName ("MoveRotateScaleToolToggleSnapModeNameCommand");
+hotkey -keyShortcut "Right" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "d" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "t" -sht -releaseName ("");
+hotkey -keyShortcut "x" -releaseName ("");
+hotkey -keyShortcut "F9" -alt -name ("");
+hotkey -keyShortcut "p" -releaseName ("");
+hotkey -keyShortcut "w" -sht -releaseName ("");
+hotkey -keyShortcut "F11" -name ("");
+hotkey -keyShortcut "t" -name ("");
+hotkey -keyShortcut "'" -releaseName ("dR_pointSnapReleaseNameCommand");
+hotkey -keyShortcut "o" -ctl -name ("");
+hotkey -keyShortcut "t" -alt -name ("");
+hotkey -keyShortcut "f" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "l" -name ("");
+hotkey -keyShortcut "d" -sht -releaseName ("");
+hotkey -keyShortcut "i" -releaseName ("TranslateToolWithSnapMarkingMenuPopDownNameCommand");
+hotkey -keyShortcut "w" -ctl -sht -name ("");
+hotkey -keyShortcut "v" -alt -sht -releaseName ("");
+hotkey -keyShortcut "%" -ctl -releaseName ("");
+hotkey -keyShortcut "p" -name ("");
+hotkey -keyShortcut "w" -sht -name ("");
+hotkey -keyShortcut "3" -name ("SelectFacetMaskNameCommand");
+hotkey -keyShortcut "F11" -releaseName ("");
+hotkey -keyShortcut "1" -ctl -name ("");
+hotkey -keyShortcut "f" -sht -name ("");
+hotkey -keyShortcut "r" -name ("");
+hotkey -keyShortcut "F9" -ctl -releaseName ("");
+hotkey -keyShortcut "," -name ("MoveRotateScaleToolToggleSnapModeNameCommand");
+hotkey -keyShortcut "Right" -ctl -alt -name ("");
+hotkey -keyShortcut "d" -ctl -sht -name ("");
+hotkey -keyShortcut "t" -sht -name ("");
+hotkey -keyShortcut "x" -name ("");
+hotkey -keyShortcut "F9" -alt -releaseName ("");
+hotkey -keyShortcut "d" -sht -name ("");
+hotkey -keyShortcut "i" -name ("TranslateToolWithSnapMarkingMenuNameCommand");
+hotkey -keyShortcut "w" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "v" -alt -sht -name ("");
+hotkey -keyShortcut "%" -ctl -name ("");
+hotkey -keyShortcut "t" -releaseName ("");
+hotkey -keyShortcut "'" -name ("dR_pointSnapPressNameCommand");
+hotkey -keyShortcut "3" -releaseName ("");
+hotkey -keyShortcut "o" -ctl -releaseName ("");
+hotkey -keyShortcut "t" -alt -releaseName ("");
+hotkey -keyShortcut "f" -ctl -sht -name ("");
+hotkey -keyShortcut "l" -releaseName ("");
+hotkey -keyShortcut "w" -releaseName ("");
+hotkey -keyShortcut "-" -releaseName ("");
+hotkey -keyShortcut "u" -sht -name ("FrameSelectedWithoutChildrenInAllViewsNameCommand");
+hotkey -keyShortcut "a" -ctl -releaseName ("");
+hotkey -keyShortcut "q" -ctl -name ("");
+hotkey -keyShortcut "x" -sht -name ("");
+hotkey -keyShortcut "Backspace" -ctl -name ("");
+hotkey -keyShortcut "," -ctl -name ("");
+hotkey -keyShortcut "=" -ctl -alt -name ("");
+hotkey -keyShortcut "Home" -alt -releaseName ("");
+hotkey -keyShortcut ";" -ctl -alt -name ("");
+hotkey -keyShortcut "," -ctl -alt -name ("");
+hotkey -keyShortcut "f" -ctl -releaseName ("");
+hotkey -keyShortcut "[" -name ("");
+hotkey -keyShortcut "s" -ctl -sht -name ("");
+hotkey -keyShortcut ">" -name ("");
+hotkey -keyShortcut "." -alt -name ("");
+hotkey -keyShortcut "<" -releaseName ("");
+hotkey -keyShortcut "Down" -ctl -releaseName ("");
+hotkey -keyShortcut "a" -alt -sht -name ("");
+hotkey -keyShortcut "h" -alt -releaseName ("");
+hotkey -keyShortcut "," -alt -name ("MoveRotateScaleToolToggleSnapRelativeModeNameCommand");
+hotkey -keyShortcut "2" -releaseName ("");
+hotkey -keyShortcut "Del" -ctl -releaseName ("");
+hotkey -keyShortcut "Ins" -releaseName ("");
+hotkey -keyShortcut "Esc" -name ("");
+hotkey -keyShortcut ">" -ctl -name ("");
+hotkey -keyShortcut "F11" -ctl -name ("");
+hotkey -keyShortcut "n" -releaseName ("");
+hotkey -keyShortcut "{" -name ("");
+hotkey -keyShortcut "1" -releaseName ("");
+hotkey -keyShortcut "a" -alt -name ("");
+hotkey -keyShortcut "s" -ctl -alt -name ("");
+hotkey -keyShortcut "x" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "~" -name ("");
+hotkey -keyShortcut "2" -ctl -name ("ConvertSelectionToVerticesNameCommand");
+hotkey -keyShortcut "Right" -ctl -name ("");
+hotkey -keyShortcut "m" -name ("");
+hotkey -keyShortcut "Space" -name ("ShowHotboxNameCommand");
+hotkey -keyShortcut "h" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "5" -ctl -releaseName ("");
+hotkey -keyShortcut "y" -ctl -releaseName ("");
+hotkey -keyShortcut "c" -ctl -sht -name ("");
+hotkey -keyShortcut "m" -ctl -releaseName ("");
+hotkey -keyShortcut "f" -alt -name ("");
+hotkey -keyShortcut "F4" -releaseName ("");
+hotkey -keyShortcut "-" -ctl -alt -name ("");
+hotkey -keyShortcut "e" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "c" -alt -releaseName ("");
+hotkey -keyShortcut "\"" -releaseName ("");
+hotkey -keyShortcut "1" -alt -releaseName ("");
+hotkey -keyShortcut "s" -sht -releaseName ("");
+hotkey -keyShortcut "F12" -ctl -name ("");
+hotkey -keyShortcut "a" -name ("RotateToolWithSnapMarkingMenuNameCommand");
+hotkey -keyShortcut "2" -alt -releaseName ("");
+hotkey -keyShortcut "z" -sht -name ("");
+hotkey -keyShortcut "-" -ctl -releaseName ("");
+hotkey -keyShortcut "p" -alt -releaseName ("");
+hotkey -keyShortcut "Down" -releaseName ("");
+hotkey -keyShortcut "Up" -alt -releaseName ("");
+hotkey -keyShortcut "q" -alt -name ("");
+hotkey -keyShortcut "PgUp" -ctl -name ("");
+hotkey -keyShortcut "<" -alt -name ("");
+hotkey -keyShortcut "r" -ctl -sht -name ("");
+hotkey -keyShortcut "Left" -alt -releaseName ("");
+hotkey -keyShortcut "F1" -releaseName ("");
+hotkey -keyShortcut ">" -alt -releaseName ("");
+hotkey -keyShortcut "=" -name ("ShowLastHiddenNameCommand");
+hotkey -keyShortcut "r" -alt -name ("");
+hotkey -keyShortcut "F12" -alt -name ("");
+hotkey -keyShortcut "x" -alt -name ("");
+hotkey -keyShortcut "Left" -ctl -name ("");
+hotkey -keyShortcut "q" -sht -releaseName ("");
+hotkey -keyShortcut "Left" -releaseName ("");
+hotkey -keyShortcut "i" -ctl -name ("UndoNameCommand");
+hotkey -keyShortcut "<" -ctl -name ("");
+hotkey -keyShortcut "m" -sht -name ("");
+hotkey -keyShortcut "p" -alt -name ("");
+hotkey -keyShortcut "Up" -alt -name ("");
+hotkey -keyShortcut "q" -alt -releaseName ("");
+hotkey -keyShortcut "s" -sht -name ("");
+hotkey -keyShortcut "F12" -ctl -releaseName ("");
+hotkey -keyShortcut "a" -releaseName ("RotateToolWithSnapMarkingMenuPopDownNameCommand");
+hotkey -keyShortcut "2" -alt -name ("SelectVertexFaceMaskNameCommand");
+hotkey -keyShortcut "z" -sht -releaseName ("");
+hotkey -keyShortcut "-" -ctl -name ("");
+hotkey -keyShortcut "x" -alt -releaseName ("");
+hotkey -keyShortcut "Down" -name ("");
+hotkey -keyShortcut "Left" -ctl -releaseName ("");
+hotkey -keyShortcut "q" -sht -name ("");
+hotkey -keyShortcut "Left" -name ("");
+hotkey -keyShortcut "i" -ctl -releaseName ("");
+hotkey -keyShortcut "<" -ctl -releaseName ("");
+hotkey -keyShortcut "m" -sht -releaseName ("");
+hotkey -keyShortcut "PgUp" -ctl -releaseName ("");
+hotkey -keyShortcut "<" -alt -releaseName ("");
+hotkey -keyShortcut "r" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "Left" -alt -name ("");
+hotkey -keyShortcut "F1" -name ("");
+hotkey -keyShortcut ">" -alt -name ("");
+hotkey -keyShortcut "=" -releaseName ("");
+hotkey -keyShortcut "r" -alt -releaseName ("");
+hotkey -keyShortcut "F12" -alt -releaseName ("");
+hotkey -keyShortcut "h" -ctl -sht -name ("");
+hotkey -keyShortcut "5" -ctl -name ("UnparentNameCommand");
+hotkey -keyShortcut "y" -ctl -name ("RedoNameCommand");
+hotkey -keyShortcut ">" -ctl -releaseName ("");
+hotkey -keyShortcut "F11" -ctl -releaseName ("");
+hotkey -keyShortcut "n" -name ("");
+hotkey -keyShortcut "{" -releaseName ("");
+hotkey -keyShortcut "1" -name ("HighQualityDisplayNameCommand");
+hotkey -keyShortcut "a" -alt -releaseName ("");
+hotkey -keyShortcut "s" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "x" -ctl -sht -name ("");
+hotkey -keyShortcut "~" -releaseName ("");
+hotkey -keyShortcut "2" -ctl -releaseName ("");
+hotkey -keyShortcut "Right" -ctl -releaseName ("");
+hotkey -keyShortcut "m" -releaseName ("");
+hotkey -keyShortcut "Space" -releaseName ("HideHotboxNameCommand");
+hotkey -keyShortcut "-" -ctl -alt -releaseName ("");
+hotkey -keyShortcut "e" -ctl -sht -name ("");
+hotkey -keyShortcut "c" -alt -name ("");
+hotkey -keyShortcut "\"" -name ("");
+hotkey -keyShortcut "1" -alt -name ("");
+hotkey -keyShortcut "c" -ctl -sht -releaseName ("");
+hotkey -keyShortcut "m" -ctl -name ("");
+hotkey -keyShortcut "f" -alt -releaseName ("");
+hotkey -keyShortcut "F4" -name ("SelectEdgeMaskNameCommand");
+hotkeyCtx -type "Editor" -addClient "timeEditorPanel";
+hotkey -keyShortcut "5" -name ("TimeEditorCreatePoseClipNameCommand");
+hotkey -keyShortcut "u" -name ("TimeEditorFrameSelectedNameCommand");
+hotkey -keyShortcut "y" -name ("TimeEditorClipHoldToggleNameCommand");
+hotkeyCtx -type "Editor" -addClient "motionMakerEditor";
+hotkey -keyShortcut "5" -name ("MotionMakerEditorPinSelectedCharacterNameCommand");
+hotkey -keyShortcut "u" -name ("MotionMakerEditorFrameSelectionNameCommand");
+hotkeyCtx -type "Editor" -addClient "sequenceEditorPanel";
+hotkey -keyShortcut "u" -name ("SequencerFrameSelectedNameCommand");
+hotkey -keyShortcut "y" -name ("SequencerToggleHoldModeNameCommand");
+hotkeyCtx -type "Editor" -addClient "profilerPanel";
+hotkeyCtx -type "Editor" -addClient "nodeEditorPanel";
+hotkeyCtx -type "Editor" -addClient "renderWindowPanel";
+hotkeyCtx -type "Editor" -addClient "hyperShadePanel";
+hotkey -keyShortcut "5" -name ("HypershadePinSelectedNameCommand");
+hotkeyCtx -type "Editor" -addClient "graphEditor";
+hotkey -keyShortcut "," -name ("GraphEditorUnlockChannelNameCommand");
+hotkey -keyShortcut "u" -name ("GraphEditorFrameSelectedNameCommand");
+hotkeyCtx -type "Editor" -addClient "shapePanel";
+hotkeyCtx -type "Editor" -addClient "posePanel";
+hotkeyCtx -type "Editor" -addClient "outlinerPanel";
+hotkeyCtx -type "Editor" -addClient "hyperGraphPanel";
+hotkeyCtx -type "Editor" -addClient "dopeSheetPanel";
+hotkey -keyShortcut "," -name ("DopeSheetUnlockChannelNameCommand");
+hotkey -keyShortcut "u" -name ("DopeSheetFrameSelectedNameCommand");
+hotkeyCtx -type "Editor" -addClient "polyTexturePlacementPanel";
+hotkey -keyShortcut "u" -name ("UVEditorFrameSelectedNameCommand");
+hotkey -keyShortcut "i" -name ("MoveUVToolNameCommand");
+hotkey -keyShortcut "a" -name ("RotateUVToolNameCommand");
+hotkey -keyShortcut "e" -name ("ScaleUVToolNameCommand");
+hotkey -keyShortcut "3" -name ("DisplayUVWireframeNameCommand");
+hotkeyCtx -type "Tool" -addClient "bpDraw";
+hotkeyCtx -type "Tool" -addClient "SymmetrizeUVBrush";
+hotkeyCtx -type "Tool" -addClient "texSculptCacheContext";
+hotkeyCtx -type "Tool" -addClient "Unfold3DBrush";
+hotkeyCtx -type "Tool" -addClient "xgmIGBrush";
+hotkeyCtx -type "Tool" -addClient "texCutContext";
+hotkeyCtx -type "Tool" -addClient "ngst2PaintContext";
+hotkey -keyShortcut "b" -name ("SkinToolsCycleWeightsDisplayModeNameCommand");
+hotkey -keyShortcut "u" -name ("SkinToolsViewFitInfluenceNameCommand");
+hotkeyCtx -type "Tool" -addClient "sculptMeshCache";
+hotkey -keyShortcut "u" -name ("SculptMeshFrameNameCommand");
+hotkeyCtx -type "Tool" -addClient "polyCutUV";
