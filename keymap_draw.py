@@ -108,7 +108,10 @@ def _key_svg(k, slots, colours, mods):
     transform = ' transform="rotate(%g %g %g)"' % (k['rot'], cx, cy) if k['rot'] else ''
     parts.append('<g%s>' % transform)
 
-    hits = slots.get((k['char'], tuple(sorted(mods))), []) if k['char'] else []
+    char, look_mods = k['char'], set(mods)
+    if char in board.CTRL_FLIPS and look_mods == {'ctrl'}:
+        char, look_mods = board.CTRL_FLIPS[char], set()
+    hits = slots.get((char, tuple(sorted(look_mods))), []) if char else []
     is_layer_mod = k['mod'] in mods
 
     if len(hits) > 1:

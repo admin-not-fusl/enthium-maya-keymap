@@ -27,14 +27,16 @@ BOARD_H = 810.0
 HOME_ROW_MODS = {'c': 'cmd', 'i': 'alt', 'a': 'ctrl', 'e': 'shift',
                  's': 'cmd', 'n': 'alt', 't': 'ctrl', 'h': 'shift'}
 
+CTRL_FLIPS = {'Down': 'Up', 'Right': 'Left'}
+
 # (x, y_of_first_key, [(legend, char), ...] top to bottom)
 _COLUMNS = [
-    (128, 111, [('F1', 'F1'), ('&thumbs_up', None), ('&thumbs_dn', None),
+    (128, 111, [('F1', 'F1'), ('↑ scroll', None), ('↓ scroll', None),
                 ('B', 'b'), ('Esc', 'Escape'), ('Magic', None)]),
     (225, 111, [('F2', 'F2'), ('1', '1'), ('Q', 'q'), ('C', 'c'), ("'", "'"), ('¥', '\\')]),
-    (323, 62, [('F3', 'F3'), ('2', '2'), ('Y', 'y'), ('I', 'i'), (',', ','), ('&Cleft', None)]),
-    (420, 62, [('F4', 'F4'), ('3', '3'), ('O', 'o'), ('A', 'a'), ('.', '.'), ('&Cright', None)]),
-    (518, 62, [('F5', 'F5'), ('4', '4'), ('U', 'u'), ('E', 'e'), (';', ';'), ('&paranq_l', None)]),
+    (323, 62, [('F3', 'F3'), ('2', '2'), ('Y', 'y'), ('I', 'i'), (',', ','), ('↕', 'Down')]),
+    (420, 62, [('F4', 'F4'), ('3', '3'), ('O', 'o'), ('A', 'a'), ('.', '.'), ('↔', 'Right')]),
+    (518, 62, [('F5', 'F5'), ('4', '4'), ('U', 'u'), ('E', 'e'), (';', ';'), ('(', '(')]),
     (616, 160, [('5', '5'), ('=', '='), ('-', '-'), ('/', '/')]),
     (1301, 160, [('6', '6'), ('X', 'x'), ('K', 'k'), ('J', 'j')]),
     (1398, 62, [('F6', 'F6'), ('7', '7'), ('L', 'l'), ('H', 'h'), ('M', 'm'), ('&paranq_r', None)]),
@@ -92,6 +94,7 @@ def _all_keys():
         for i, (legend, char) in enumerate(entries):
             out.append({'x': x, 'y': y0 + i * PITCH, 'rot': 0, 'legend': legend,
                         'char': char, 'mod': HOME_ROW_MODS.get(char)})
+
     for x, y, rot, legend, char, mod in _THUMBS:
         out.append({'x': x, 'y': y, 'rot': rot, 'legend': legend, 'char': char, 'mod': mod})
     return out

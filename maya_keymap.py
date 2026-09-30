@@ -325,7 +325,10 @@ def _code_of(a):
         p = os.path.join(a['dir'], a['script'])
         with open(p, encoding='utf-8') as f:
             code = f.read()
-        return code, ('mel' if p.lower().endswith('.mel') else 'python')
+        if p.lower().endswith('.mel'):
+            return code, 'mel'
+        path = os.path.abspath(p).replace('\\', '/')
+        return '__file__ = %r\n' % path + code, 'python'
     return None, None
 
 
@@ -413,7 +416,7 @@ def _query(key, mods, ctx=None):
             return (cmds.hotkey(key, q=True, name=True, **flags) or '',
                     cmds.hotkey(key, q=True, releaseName=True, **flags) or '')
     except RuntimeError:
-        return '', 
+        return '',
 
 
 def _set_flags(mods):
